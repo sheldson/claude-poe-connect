@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================
-# Poe x Claude Code 启动器 (v4.2 依赖修复版)
+# Poe x Claude Code 启动器 (v5.1 兼容性修复版)
 # ==========================================
 
 set -e
@@ -21,16 +21,13 @@ NC='\033[0m'
 
 echo -e "${BLUE}🚀 初始化 Poe x Claude Code 环境...${NC}"
 
-# 1. 环境检查
+# 1. 环境检查 & 自动补全依赖
 if ! command -v python3 &> /dev/null; then echo -e "${RED}❌ 错误: 未找到 Python3${NC}"; exit 1; fi
 
-# === 关键修复：检测是否安装了 proxy 所需的额外依赖 (例如 backoff) ===
+# 检测是否安装了 proxy 所需的额外依赖
 if ! python3 -c "import backoff" &> /dev/null; then 
-    echo -e "${YELLOW}📦 检测到缺失 Proxy 依赖，正在补全安装 'litellm[proxy]'...${NC}"
-    # 注意：使用引号防止 zsh 报错
+    echo -e "${YELLOW}📦 正在补全 LiteLLM Proxy 依赖...${NC}"
     pip install "litellm[proxy]" -q
-else
-    echo -e "${GREEN}✅ LiteLLM 及 Proxy 依赖已安装${NC}"
 fi
 
 # 2. 密钥处理
@@ -61,42 +58,38 @@ else
     echo -e "${BLUE}🔌 准备启动代理服务...${NC}"
     
     echo -e "🤖 默认使用模型: ${GREEN}$DEFAULT_POE_BOT${NC}"
-    echo -ne "   按回车确认，或输入其他 Bot 名称: "
-    read INPUT_BOT
-    BOT_NAME=${INPUT_BOT:-$DEFAULT_POE_BOT}
-    echo -e "   使用模型: ${BLUE}$BOT_NAME${NC}"
+    BOT_NAME=$DEFAULT_POE_BOT
     
     export OPENAI_API_KEY="$POE_API_KEY"
     
-    # 清理旧日志
     rm -f litellm.log
 
-    # 启动 LiteLLM
+    # === 关键修改 ===
+    # 增加了 --drop_params 参数
+    # 这会自动过滤掉 Poe 不支持的参数 (如 thinking)，防止 400 报错
     nohup litellm --model "openai/$BOT_NAME" \
         --api_base "$POE_API_ENDPOINT" \
         --port $LITELLM_PORT \
         --alias "claude-3-5-sonnet-20241022" \
         --alias "claude-3-5-sonnet-latest" \
         --alias "claude-sonnet-4-5-20250929" \
+        --drop_params \
         > litellm.log 2>&1 &
         
     LITELLM_PID=$!
     
-    echo -ne "⏳ 正在连接 Poe..."
-    sleep 3
-    
+    sleep 2
     if ! kill -0 $LITELLM_PID 2>/dev/null; then
-        echo -e "\n${RED}❌ 代理启动失败！请查看 litellm.log 获取详情。${NC}"
-        echo -e "${YELLOW}日志最后 10 行:${NC}"
+        echo -e "\n${RED}❌ 代理启动失败！日志如下：${NC}"
         tail -n 10 litellm.log
         exit 1
     fi
-    echo -e "\n${GREEN}✅ 连接成功! (PID: $LITELLM_PID)${NC}"
+    echo -e "${GREEN}✅ 代理就绪 (PID: $LITELLM_PID)${NC}"
     EXISTING_PROXY=false
 fi
 
 # 4. 启动 Claude Code
-echo -e "${BLUE}🚀 正在启动 Claude Code...${NC}"
+echo -e "${BLUE}🚀 启动 Claude Code (已锁定 $DEFAULT_POE_BOT)...${NC}"
 echo -e "${YELLOW}------------------------------------------------${NC}"
 
 unset ANTHROPIC_AUTH_TOKEN
@@ -107,7 +100,7 @@ export ANTHROPIC_API_KEY="sk-fake-key-bypass"
 
 cleanup() {
     if [ "$EXISTING_PROXY" = false ]; then
-        echo -e "\n${BLUE}🧹 正在关闭代理服务...${NC}"
+        echo -e "\n${BLUE}🧹 关闭代理服务...${NC}"
         kill $LITELLM_PID 2>/dev/null
     fi
 }
